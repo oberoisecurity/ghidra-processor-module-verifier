@@ -1,18 +1,33 @@
 # Ghidra Processor Module Verifier (Verifier)
 
-Ghidra Processor Module Verifier (Verifier) automates the verification of [Ghidra](https://github.com/NationalSecurityAgency/ghidra) processor modules. Verifier takes as input a compiled Ghidra processor module (.sla) and a JSON file of processor unit tests. It then leverages libsla's p-code emulator to execute each instruction one by one, comparing the emulated result with the expected processor unit test result. A processor unit test is considered successfully if all registers and memory values match the unit test.
+Ghidra Processor Module Verifier (Verifier) automates the verification of [Ghidra](https://github.com/NationalSecurityAgency/ghidra) processor modules. Verifier takes as input a compiled Ghidra processor module (.sla) and a JSON file of processor unit tests. It then leverages libsla's p-code emulator to execute each instruction one by one, comparing the emulated result with the expected processor unit test result. A processor unit test is considered successfully if all registers and memory values match the unit test. See [RESULTS.md](RESULTS.md) for issues already found.
 
 This is an early proof-of-concept and I have only tested on the 6502 processor so far. I plan on refactoring as well as improving error handling and output.
 
 ## Usage
-`verifier --sla-file <path_to_compiled_processor_sla_file> --json-test <path_to_json_unit_test_file>`
+```
+./verifier
+Ghidra Processor Module Verifier:
+  -s [ --sla-file ] arg        Path to the compiled processor .sla. Required
+  -j [ --json-test ] arg       Path to json test file. Required
+  -p [ --program-counter ] arg Name of the program counter register. Required
+  --start-test arg             First test to start with. Optional. 0 if not
+                               specified
+  --max-failures arg           Maximum numberof test failures allowed before
+                               aborting test. Optional. 10 if not specified
+  --register-map arg           Path to file containing mapping of test
+                               registers to Ghidra processor module registers.
+                               Optional.
+  -h [ --help ]                Help screen
+
+```
 
 Ex.
 
 `./verifier --sla-file ~/ghidra_10.4_PUBLIC/Ghidra/Processors/6502/data/languages/6502.sla --json-test ~/ProcessorTests/6502/v1/00.json`
 
-## JSON Unit Test
-Verifier uses the processor unit tests from https://github.com/TomHarte/ProcessorTests. You can use those directly or write your own using the same JSON format. Each JSON file contains an array of independent processor tests. Verifier resets state after each instruction. The unit tests contain initial register state, initial ram state, final register state, final ram state. GPMV does not use the cycles field.
+### JSON Unit Test
+Verifier uses the processor unit tests from https://github.com/TomHarte/ProcessorTests. You can use those directly or write your own using the same JSON format. Each JSON file contains an array of independent processor tests. Verifier resets state after each instruction. The unit tests contain initial register state, initial ram state, final register state, final ram state. Verifier does not use the cycles field.
 
 Sample test:
 ```
@@ -63,7 +78,7 @@ Sample test:
     }
 ```
 
-## Compiling a Ghidra Processor Module (.sla)
+### Compiling a Ghidra Processor Module (.sla)
 Verifier requries a compiled Ghidra processor module as an input. To compile:
 
 1) cd to `<GHIDRA_RELEASE>/support`. This is a release build of Ghidra, not a source checkout.
@@ -91,9 +106,27 @@ Ex.
 > 2 languages successfully compiled
 ```
 
+### Register Map
+Sometimes the names/casing of Ghidra's processor module's registers don't match the names/casing in the unit tests. In that case you can optionally use the `--register-map` command line argument. The register map is a text file that maps the unit tests register names to their Ghidra equivalents. As an example, for the 6502 processor module:
+
+```
+# This is a mapping of your test registers to Ghidra's
+# Left should be what the register is named in your test
+# Right should be what Ghidra's processor module names it
+# example: pc=PC
+pc=PC
+s=S
+a=A
+x=X
+y=Y
+p=P
+```
+Ghidra's processor module used capitalized register names whereas the unit test used lowercase. The register map file simplies mapping the unit test register names to match Ghidra's. Lines beginning with a "#" are ignored as comments.
+
 ## Issues
 - **memory diffing is not correct**. Currently Verifier just checks the expected final result of memory against the emulator's memory. This will catch most bugs, but will not catch issues where the emulator overwrote memory that is not being checked in the unit test. The issue I have is that libsla does not appear to expose an interface to log all memory reads/writes. One option would be to simply read all of the emulator's memory at the end of every test but that will not be possible on larger address spaces.
-- the program counter register must be specified at the command line. There isn't anyting in in the .sla file to say which register is the program counter.
+- the program counter register must be specified at the command line. There isn't anyting in in the .sla file to say which register is the program counter. Issue filed with Ghidra.
+- refactor backends to be more generic
 
 ## Future Work
 JSON unit tests are an easy place to start. From here:
@@ -117,14 +150,14 @@ JSON unit tests are an easy place to start. From here:
 #### Building libsla
 libsla is required for compiling Verifier. To build libsla:
 1) Checkout Ghidra from trunk. A release build of Ghidra is not sufficient. `git clone https://github.com/NationalSecurityAgency/ghidra` This path will be your GHIDRA_TRUNK directory.
-2) CD to the decompiler source directory: `cd ~/ghidra/Ghidra/Features/Decompiler/src/decompile/cpp`
+2) cd to the decompiler source directory: `cd ~/ghidra/Ghidra/Features/Decompiler/src/decompile/cpp`
 3) Compile: `make libsla.a`
 
 ## Results
 See [RESULTS.md](RESULTS.md).
 
 ## License
-Licensed under the Apache 2.0 license. See LICENSE.
+Licensed under the Apache 2.0 license. See [LICENSE](LICENSE).
 
 ## Credits
 * libsla - [Ghidra's](https://github.com/NationalSecurityAgency/ghidra) library for SLEIGH

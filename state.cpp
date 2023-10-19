@@ -13,8 +13,6 @@
 // print the state structure
 int print_state(TEST_STATE &a)
 {
-    int result = 0;
-
     cout << "\tRegisters:" << endl;
     for (auto& [register_name, value] : a.registers)
     {
