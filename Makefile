@@ -14,4 +14,4 @@ verifier: $(OBJ)
 
 .PHONY: clean
 clean:
-	rm -f *.o verifier
+	rm -f *.o backends/*.o verifier
