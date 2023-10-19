@@ -22,9 +22,106 @@ Ghidra Processor Module Verifier:
 
 ```
 
-Ex.
+Success example:
 
-`./verifier --sla-file ~/ghidra_10.4_PUBLIC/Ghidra/Processors/6502/data/languages/6502.sla --json-test ~/ProcessorTests/6502/v1/00.json`
+```
+./verifier --sla-file ~/ghidra_10.4_PUBLIC/Ghidra/Processors/6502/data/languages/6502.sla --json-test ~/ProcessorTests/6502/v1/ea.json --program-counter PC --max-failures 1 --register-map reg_map.txt
+Ghidra Processor Module Verifier (Verifier)
+[*] Settings:
+	[*] Compiled SLA file: ~/Desktop/ghidra_10.4_PUBLIC/Ghidra/Processors/6502/data/languages/6502.sla
+	[*] JSON Test file: ~/ProcessorTests/6502/v1/ea.json
+	[*] Program counter register: PC
+	[*] Word size: 2
+	[*] Register Mapping Count: 6
+	[*] Max allowed failures: 1
+	[*] Start test: 0
+	[*] Register Mapping Count: 6
+[*] ~/ProcessorTests/6502/v1/ea.json: Loaded 10000 test cases.
+[+] 0) SUCCESS
+[+] 1) SUCCESS
+[+] 2) SUCCESS
+[+] 3) SUCCESS
+...
+...
+[+] 9999) SUCCESS
+[+] 10000) SUCCESS
+```
+
+Failure (on first test) example:
+
+```
+./verifier --sla-file ~/ghidra_10.4_PUBLIC/Ghidra/Processors/6502/data/languages/6502.sla --json-test ~/ProcessorTests/6502/v1/00.json --program-counter PC --max-failures 1 --register-map reg_map.txt
+Ghidra Processor Module Verifier (Verifier)
+[*] Settings:
+	[*] Compiled SLA file: ~/Desktop/ghidra_10.4_PUBLIC/Ghidra/Processors/6502/data/languages/6502.sla
+	[*] JSON Test file: ~/ProcessorTests/6502/v1/00.json
+	[*] Program counter register: PC
+	[*] Word size: 2
+	[*] Register Mapping Count: 6
+	[*] Max allowed failures: 1
+	[*] Start test: 0
+	[*] Register Mapping Count: 6
+[*] ~/ProcessorTests/6502/v1/00.json: Loaded 10000 test cases.
+!! MEMORY ERROR: 335 122 0
+!! MEMORY ERROR: 336 132 131
+[-] 0) FAIL
+Initial State:
+	Registers:
+		A: 203
+		P: 106
+		PC: 35714
+		S: 81
+		X: 117
+		Y: 162
+	RAM:
+		9684: 237
+		35714: 0
+		35715: 63
+		35716: 247
+		65534: 212
+		65535: 37
+
+Final (Expected) State:
+	Registers:
+		A: 203
+		P: 110
+		PC: 9684
+		S: 78
+		X: 117
+		Y: 162
+	RAM:
+		335: 122
+		336: 132
+		337: 139
+		9684: 237
+		35714: 0
+		35715: 63
+		35716: 247
+		65534: 212
+		65535: 37
+
+Emulator:
+	Registers:
+		A: 203
+		P: 110
+		PC: 9684
+		S: 78
+		X: 117
+		Y: 162
+	RAM:
+		335: 0
+		336: 131
+		337: 139
+		9684: 237
+		35714: 0
+		35715: 63
+		35716: 247
+		65534: 212
+		65535: 37
+
+[-] Max failures encountered 1
+[-] Test failed: -1
+```
 
 ### JSON Unit Test
 Verifier uses the processor unit tests from https://github.com/TomHarte/ProcessorTests. You can use those directly or write your own using the same JSON format. Each JSON file contains an array of independent processor tests. Verifier resets state after each instruction. The unit tests contain initial register state, initial ram state, final register state, final ram state. Verifier does not use the cycles field.
@@ -125,7 +222,7 @@ Ghidra's processor module used capitalized register names whereas the unit test 
 
 ## Issues
 - **memory diffing is not correct**. Currently Verifier just checks the expected final result of memory against the emulator's memory. This will catch most bugs, but will not catch issues where the emulator overwrote memory that is not being checked in the unit test. The issue I have is that libsla does not appear to expose an interface to log all memory reads/writes. One option would be to simply read all of the emulator's memory at the end of every test but that will not be possible on larger address spaces.
-- the program counter register must be specified at the command line. There isn't anyting in in the .sla file to say which register is the program counter. Issue filed with Ghidra.
+- the program counter register must be specified at the command line. There isn't anyting in in the .sla file to say which register is the program counter. Issue filed with [Ghidra](https://github.com/NationalSecurityAgency/ghidra/issues/5888).
 - refactor backends to be more generic
 
 ## Future Work
