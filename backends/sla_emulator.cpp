@@ -7,9 +7,18 @@
 // Licensed under the Apache 2.0 License.
 //--------------------------------------------------------------------------------------
 #include "sla_emulator.h"
+#include <boost/timer/timer.hpp>
+#include <boost/thread/mutex.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/thread_pool.hpp>
+#include <boost/thread/thread.hpp>
+#include <boost/bind.hpp>
 #include <iostream>
+#include "json.h"
 
 using namespace std;
+
+int execute_test(TEST_PARAMS& test_params, unsigned int test_id, TEST_STATE initial_state, TEST_STATE final_state, DocumentStorage docstorage);
 
 // This is a tiny LoadImage class which feeds the executable bytes to the translator
 class MyLoadImage : public LoadImage {
@@ -46,12 +55,9 @@ void MyLoadImage::loadFill(uint1 *ptr, int4 size, const Address &addr)
     }
 }
 
-int sla_emulate(TEST_PARAMS &test_params, TEST_STATE &initial_state, TEST_STATE &final_state)
+int sla_emulate(TEST_PARAMS &test_params, TEST_STATE &initial_state, TEST_STATE &final_state, DocumentStorage docstorage)
 {
     map<unsigned long long, unsigned char> address_space; // represents the emulators address space
-    AttributeId::initialize();
-    ElementId::initialize();
-    int result = 0;
 
     // Set up the context object
     ContextInternal context;
@@ -63,22 +69,10 @@ int sla_emulate(TEST_PARAMS &test_params, TEST_STATE &initial_state, TEST_STATE 
     }
 
     MyLoadImage loader(&address_space);
-
     Sleigh trans(&loader, &context);
 
-    // Read sleigh file into DOM
-    DocumentStorage docstorage;
-    Element *sleighroot = docstorage.openDocument(test_params.sla_filename)->getRoot();
-    docstorage.registerTag(sleighroot);
     trans.initialize(docstorage); // Initialize the translator
 
-    result = sla_emulate_internal(test_params, trans, loader, initial_state, final_state);
-
-    return result;
-}
-
-int sla_emulate_internal(TEST_PARAMS &test_params, Translate &trans,LoadImage &loader, TEST_STATE &initial_state, TEST_STATE &final_state)
-{
     // Set up memory state object
     // TODO: get page size dynamically
     MemoryImage loadmemory(trans.getDefaultCodeSpace(), test_params.word_size, 4096, &loader);
@@ -163,3 +157,109 @@ int sla_emulate_internal(TEST_PARAMS &test_params, Translate &trans,LoadImage &l
 
     return 0;
 }
+
+int parallelize_test(TEST_PARAMS& test_params)
+{
+    boost::timer::auto_cpu_timer t;
+    vector<TEST_STATE> initial_states;
+    vector<TEST_STATE> final_states;
+    unsigned int fail_count = 0;
+    boost::asio::thread_pool thread_pool(16); // TODO; this should be a parameter
+    int result = 0;
+
+    result = get_tests(test_params, initial_states, final_states);
+    if(result != 0)
+    {
+        cout << "[-] Failed to load unit tests!" << endl;
+        return -1;
+    }
+
+    cout << "[*] " << test_params.json_filename << ": Loaded " << initial_states.size() << " test cases." << endl;
+
+    AttributeId::initialize();
+    ElementId::initialize();
+
+    // Read sleigh file into DOM
+
+    DocumentStorage docstorage;
+    Element *sleighroot = docstorage.openDocument(test_params.sla_filename)->getRoot();
+
+    // TODO: improve performance of loop
+    for(unsigned int i = 0; i < initial_states.size();i ++)
+    {
+        // TODO: DocumentStorage needs to be copied or crashes will happen...
+        DocumentStorage docstorage2;
+        docstorage2.registerTag(sleighroot);
+
+        boost::asio::post(thread_pool, boost::bind(execute_test, test_params, i, initial_states[i], final_states[i], docstorage2));
+    }
+    cout << "\n\n\n\nDone posting threads.\n\n\n" << endl;
+
+    // TODO: poll for max errors being hit
+
+    // wait for threads to finish
+    thread_pool.join();
+
+    return 0;
+}
+
+int execute_test(TEST_PARAMS& test_params, unsigned int test_id, TEST_STATE initial_state, TEST_STATE final_state, DocumentStorage docstorage)
+{
+    unsigned int fail_count = 0;
+    int result = 0;
+    TEST_STATE emu_final_state;
+
+    for (const auto & [address, value] : final_state.memory)
+    {
+        emu_final_state.memory[address] = 0;
+    }
+
+    try
+    {
+        result = sla_emulate(test_params, initial_state, emu_final_state,  docstorage);
+        if(result != 0)
+        {
+            cout << "[-] Fatal emulation error!" << endl;
+            return result;
+        }
+    }
+    catch(BadDataError &e)
+    {
+        cout << "[-] BadDataError: " << e.explain << endl;
+        return -1;
+    }
+
+    result = compare_state(final_state, emu_final_state);
+    if(result != 0)
+    {
+        // TODO: output failure
+        cout << "[-] " << test_id << ") FAIL" << endl;
+
+        cout << "Initial State:" << endl;
+        print_state(initial_state);
+        cout << endl;
+
+        cout << "Final (Expected) State:" << endl;
+        print_state(final_state);
+        cout << endl;
+
+        cout << "Emulator:" << endl;
+        print_state(emu_final_state);
+        cout << endl;
+
+        fail_count++;
+        if(fail_count >= test_params.max_failures)
+        {
+            cout << "[-] Max failures encountered " << test_params.max_failures << endl;
+            return -1;
+        }
+    }
+    else
+    {
+        cout << "[+] " << test_id << ") SUCCESS" << endl;
+    }
+
+
+    return 0;
+}
+

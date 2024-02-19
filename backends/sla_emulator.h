@@ -12,5 +12,5 @@
 
 using namespace ghidra;
 
-int sla_emulate(TEST_PARAMS &test_params, TEST_STATE &initial_state, TEST_STATE &final_state);
-int sla_emulate_internal(TEST_PARAMS &test_params, Translate &trans,LoadImage &loader, TEST_STATE &initial_state, TEST_STATE &final_state);
+int sla_emulate(TEST_PARAMS &test_params, TEST_STATE &initial_state, TEST_STATE &final_state, DocumentStorage docstorage);
+int sla_emulate_internal(TEST_PARAMS &test_params, TEST_STATE &initial_state, TEST_STATE &final_state, DocumentStorage docstorage);
