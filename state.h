@@ -22,6 +22,8 @@ typedef struct _TEST_PARAMS
     string program_counter; // program program_counter
     unsigned int max_failures; // maximum number of failures allowed before aborting test
     unsigned int start_test; // what test number to start on
+    unsigned int end_test; // what test number to end on
+    unsigned int num_threads; // how many threads to use
 
     // obtained via sla file
     unsigned int word_size;

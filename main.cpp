@@ -10,11 +10,15 @@
 #include <iostream>
 #include <fstream>
 #include <boost/program_options.hpp>
-
+#include <boost/timer/timer.hpp>
 #include <map>
 #include <exception>
 #include <boost/unordered_map.hpp>
 #include <boost/filesystem.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/thread_pool.hpp>
+#include <boost/thread/thread.hpp>
+#include <boost/bind.hpp>
 #include "state.h"
 #include "sla_util.h"
 #include "backends/json.h"
@@ -25,7 +29,7 @@ using namespace std;
 void default_test_params(TEST_PARAMS &test_params);
 void display_test_params(TEST_PARAMS &test_params);
 int parse_register_mapping(string register_mapping_filename, map<std::string, std::string>& register_mapping);
-int execute_test(TEST_PARAMS &test_params);
+int parallelize_test(TEST_PARAMS &test_params);
 
 int main(int argc, char *argv[])
 {
@@ -49,6 +53,8 @@ int main(int argc, char *argv[])
             ("json-test,j", boost::program_options::value<string>(&test_params.json_filename), "Path to json test file. Required")
             ("program-counter,p", boost::program_options::value<string>(&test_params.program_counter), "Name of the program counter register. Required")
             ("start-test", boost::program_options::value<unsigned int>(&test_params.start_test), "First test to start with. Optional. 0 if not specified")
+            ("end-test", boost::program_options::value<unsigned int>(&test_params.end_test), "Last test to end with. Optional. MAX_INT if not specified")
+            ("num-threads,t", boost::program_options::value<unsigned int>(&test_params.num_threads), "How many threads to use. Optional. 1 if not specified")
             ("max-failures", boost::program_options::value<unsigned int>(&test_params.max_failures), "Maximum numberof test failures allowed before aborting test. Optional. 10 if not specified")
             ("register-map", boost::program_options::value<string>(&test_params.register_map_filename), "Path to file containing mapping of test registers to Ghidra processor module registers. Optional.")
             ("help,h", "Help screen");
@@ -100,9 +106,15 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    if(test_params.num_threads == 0)
+    {
+        cout << "[-] Number of threads must be positive!" << endl;
+        return -1;
+    }
+
     display_test_params(test_params);
 
-    result = execute_test(test_params);
+    result = parallelize_test(test_params);
     if(result != 0)
     {
         cout << "[-] Test failed: " << result << endl;
@@ -117,7 +129,9 @@ void default_test_params(TEST_PARAMS &test_params)
 {
     test_params.max_failures = 10;
     test_params.start_test = 0;
+    test_params.end_test = 0xFFFFFFFF; // if not set will be reduced to num of submitted tests
     test_params.word_size = 0;
+    test_params.num_threads = 1;
 }
 
 // default test params for optional params if not specified at the command line
@@ -187,81 +201,6 @@ int parse_register_mapping(string register_map_filename, map<std::string, std::s
     if(num_reg_mappings == 0)
     {
         return -1;
-    }
-
-    return 0;
-}
-
-int execute_test(TEST_PARAMS& test_params)
-{
-    vector<TEST_STATE> initial_states;
-    vector<TEST_STATE> final_states;
-    unsigned int fail_count = 0;
-    int result = 0;
-
-    result = get_tests(test_params, initial_states, final_states);
-    if(result != 0)
-    {
-        cout << "[-] Failed to load unit tests!" << endl;
-        return -1;
-    }
-
-    cout << "[*] " << test_params.json_filename << ": Loaded " << initial_states.size() << " test cases." << endl;
-
-    for(unsigned int i = test_params.start_test; i < initial_states.size(); i++)
-    {
-        TEST_STATE emu_final_state;
-
-        for (const auto & [address, value] : final_states[i].memory)
-        {
-            emu_final_state.memory[address] = 0;
-        }
-
-        try
-        {
-            result = sla_emulate(test_params, initial_states[i], emu_final_state);
-            if(result != 0)
-            {
-                cout << "[-] Fatal emulation error!" << endl;
-                return result;
-            }
-        }
-        catch(BadDataError &e)
-        {
-            cout << "[-] BadDataError: " << e.explain << endl;
-            return -1;
-        }
-
-        result = compare_state(final_states[i], emu_final_state);
-        if(result != 0)
-        {
-            cout << "[-] " << i << ") FAIL" << endl;
-
-            cout << "Initial State:" << endl;
-            print_state(initial_states[i]);
-            cout << endl;
-
-            cout << "Final (Expected) State:" << endl;
-            print_state(final_states[i]);
-            cout << endl;
-
-            cout << "Emulator:" << endl;
-            print_state(emu_final_state);
-            cout << endl;
-
-            fail_count++;
-            if(fail_count >= test_params.max_failures)
-            {
-                cout << "[-] Max failures encountered " << test_params.max_failures << endl;
-                return -1;
-            }
-
-          continue;
-      }
-      else
-      {
-        cout << "[+] " << i << ") SUCCESS" << endl;
-      }
     }
 
     return 0;
