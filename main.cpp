@@ -53,6 +53,8 @@ int main(int argc, char *argv[])
             ("json-test,j", boost::program_options::value<string>(&test_params.json_filename), "Path to json test file. Required")
             ("program-counter,p", boost::program_options::value<string>(&test_params.program_counter), "Name of the program counter register. Required")
             ("start-test", boost::program_options::value<unsigned int>(&test_params.start_test), "First test to start with. Optional. 0 if not specified")
+            ("end-test", boost::program_options::value<unsigned int>(&test_params.end_test), "Last test to end with. Optional. MAX_INT if not specified")
+            ("num-threads,t", boost::program_options::value<unsigned int>(&test_params.num_threads), "How many threads to use. Optional. 1 if not specified")
             ("max-failures", boost::program_options::value<unsigned int>(&test_params.max_failures), "Maximum numberof test failures allowed before aborting test. Optional. 10 if not specified")
             ("register-map", boost::program_options::value<string>(&test_params.register_map_filename), "Path to file containing mapping of test registers to Ghidra processor module registers. Optional.")
             ("help,h", "Help screen");
@@ -104,6 +106,12 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    if(test_params.num_threads == 0)
+    {
+        cout << "[-] Number of threads must be positive!" << endl;
+        return -1;
+    }
+
     display_test_params(test_params);
 
     result = parallelize_test(test_params);
@@ -121,7 +129,9 @@ void default_test_params(TEST_PARAMS &test_params)
 {
     test_params.max_failures = 10;
     test_params.start_test = 0;
+    test_params.end_test = 0xFFFFFFFF; // if not set will be reduced to num of submitted tests
     test_params.word_size = 0;
+    test_params.num_threads = 1;
 }
 
 // default test params for optional params if not specified at the command line

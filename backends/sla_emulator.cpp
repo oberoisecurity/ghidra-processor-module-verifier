@@ -7,16 +7,42 @@
 // Licensed under the Apache 2.0 License.
 //--------------------------------------------------------------------------------------
 #include "sla_emulator.h"
+#include <boost/atomic.hpp>
 #include <boost/timer/timer.hpp>
 #include <boost/thread/mutex.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/thread_pool.hpp>
+#include <boost/chrono.hpp>
 #include <boost/thread/thread.hpp>
 #include <boost/bind.hpp>
 #include <iostream>
+#include <boost/asio/execution.hpp>
 #include "json.h"
 
 using namespace std;
+
+boost::atomic<unsigned int> failure_count = 0;
+boost::atomic<unsigned int> completed_count = 0;
+
+void incrementTestFailures(void)
+{
+    failure_count++;
+}
+
+unsigned int getTestFailures(void)
+{
+    return failure_count;
+}
+
+void incrementTestCompletions(void)
+{
+    completed_count++;
+}
+
+unsigned int getTestCompletions(void)
+{
+    return completed_count;
+}
 
 int execute_test(TEST_PARAMS& test_params, unsigned int test_id, TEST_STATE initial_state, TEST_STATE final_state, DocumentStorage docstorage);
 
@@ -163,8 +189,10 @@ int parallelize_test(TEST_PARAMS& test_params)
     boost::timer::auto_cpu_timer t;
     vector<TEST_STATE> initial_states;
     vector<TEST_STATE> final_states;
+    unsigned int completed_count = 0;
     unsigned int fail_count = 0;
-    boost::asio::thread_pool thread_pool(16); // TODO; this should be a parameter
+    boost::asio::thread_pool thread_pool(test_params.num_threads);
+    unsigned int cases_submitted = 0;
     int result = 0;
 
     result = get_tests(test_params, initial_states, final_states);
@@ -174,40 +202,87 @@ int parallelize_test(TEST_PARAMS& test_params)
         return -1;
     }
 
-    cout << "[*] " << test_params.json_filename << ": Loaded " << initial_states.size() << " test cases." << endl;
+    cout << "[*] " << test_params.json_filename << ": Loaded " << initial_states.size() << " test cases" << endl;
+
+    // can't have end test greater than the number of total tests
+    if(test_params.end_test >= initial_states.size())
+    {
+        test_params.end_test = initial_states.size();
+    }
+    cout << "[*] Test Range: "  << test_params.start_test << "-" << test_params.end_test << endl;
+
 
     AttributeId::initialize();
     ElementId::initialize();
 
     // Read sleigh file into DOM
-
     DocumentStorage docstorage;
     Element *sleighroot = docstorage.openDocument(test_params.sla_filename)->getRoot();
 
     // TODO: improve performance of loop
-    for(unsigned int i = 0; i < initial_states.size();i ++)
+    for(unsigned int i = test_params.start_test; i < test_params.end_test; i++)
     {
         // TODO: DocumentStorage needs to be copied or crashes will happen...
         DocumentStorage docstorage2;
         docstorage2.registerTag(sleighroot);
 
         boost::asio::post(thread_pool, boost::bind(execute_test, test_params, i, initial_states[i], final_states[i], docstorage2));
+        cases_submitted++;
     }
-    cout << "\n\n\n\nDone posting threads.\n\n\n" << endl;
+    cout << "[*] Done posting tests" << endl;
 
-    // TODO: poll for max errors being hit
+    // TODO: improve poll logic
+    while(1)
+    {
+        boost::this_thread::sleep(boost::posix_time::milliseconds(100));
+
+        completed_count = getTestCompletions();
+        fail_count = getTestFailures();
+
+        cout << "Test cases: " << completed_count << "/" << cases_submitted  << " Fail cases: " << fail_count << endl;
+
+        // check if we exceeded our max number of failures
+        if(fail_count >= test_params.max_failures)
+        {
+            // abort the rest of the threads
+            thread_pool.stop();
+            break;
+        }
+
+        // check if we finished our submitted jobs
+        if(completed_count >= cases_submitted)
+        {
+            // finished
+            break;
+        }
+    }
 
     // wait for threads to finish
+    // should be quick as we exited the polling loop
     thread_pool.join();
+
+    cout << "Cases submitted " << cases_submitted  << endl;
+    cout << "Completed cases " << getTestCompletions() << endl;
+    cout << "Fail cases " << getTestFailures() << endl;
 
     return 0;
 }
 
 int execute_test(TEST_PARAMS& test_params, unsigned int test_id, TEST_STATE initial_state, TEST_STATE final_state, DocumentStorage docstorage)
 {
+    TEST_STATE emu_final_state;
     unsigned int fail_count = 0;
     int result = 0;
-    TEST_STATE emu_final_state;
+
+    // check if we hit the max number of test failures
+    fail_count = getTestFailures();
+    if(fail_count >= test_params.max_failures)
+    {
+        // hit max failures, just return
+        return 0;
+    }
+
+    incrementTestCompletions();
 
     for (const auto & [address, value] : final_state.memory)
     {
@@ -247,19 +322,12 @@ int execute_test(TEST_PARAMS& test_params, unsigned int test_id, TEST_STATE init
         print_state(emu_final_state);
         cout << endl;
 
-        fail_count++;
-        if(fail_count >= test_params.max_failures)
-        {
-            cout << "[-] Max failures encountered " << test_params.max_failures << endl;
-            return -1;
-        }
+        incrementTestFailures();
     }
     else
     {
         cout << "[+] " << test_id << ") SUCCESS" << endl;
     }
 
-
     return 0;
 }
-
