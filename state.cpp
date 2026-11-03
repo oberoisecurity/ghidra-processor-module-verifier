@@ -8,62 +8,79 @@
 //--------------------------------------------------------------------------------------
 
 #include "state.h"
-#include <iostream>
+#include <sstream>
 
-// print the state structure
-int print_state(TEST_STATE &a)
+namespace
 {
-    cout << "\tRegisters:" << endl;
-    for (auto& [register_name, value] : a.registers)
-    {
-        cout << "\t\t" << register_name << ": " << value << endl;
-    }
-
-    cout << "\tRAM:" << endl;
-    for (auto& [address, value] : a.memory)
-    {
-        cout << "\t\t" << address << ": " << (unsigned int)value << endl;
-    }
-
-    return 0;
+// "203 (0xcb)"
+std::string fmt(uint64_t value)
+{
+    std::ostringstream s;
+    s << value << " (0x" << std::hex << value << ")";
+    return s.str();
+}
 }
 
-// Compare states
-// return 0 if a and b are equal
-int compare_state(TEST_STATE &a, TEST_STATE &b)
+// print the state structure
+void print_state(const TEST_STATE &state, std::ostream &out)
 {
-    int result = 0;
-
-    // TODO: check the opposite conditions as well.
-    // It is not sufficient to check that all of a's registers are equal to b's
-    // We need to check all of b's registers are equal to a's
-    // Same for memory
-
-    // validate registers
-    for (auto& [register_name, value] : a.registers)
+    out << "\tRegisters:" << std::endl;
+    for (const auto &[register_name, value] : state.registers)
     {
-        unsigned int reg_a = value;
-        unsigned int reg_b = b.registers[register_name];
+        out << "\t\t" << register_name << ": " << fmt(value) << std::endl;
+    }
 
-        if(reg_a != reg_b)
+    out << "\tRAM:" << std::endl;
+    for (const auto &[address, value] : state.memory)
+    {
+        out << "\t\t" << fmt(address) << ": " << fmt(value) << std::endl;
+    }
+}
+
+bool compare_state(const TEST_STATE &expected, const EMU_RESULT &actual, std::ostream &out)
+{
+    bool match = true;
+
+    if (!actual.error.empty())
+    {
+        out << "!! EMULATOR ERROR: " << actual.error << std::endl;
+        match = false;
+    }
+
+    for (const auto &[register_name, value] : expected.registers)
+    {
+        auto it = actual.state.registers.find(register_name);
+        if (it == actual.state.registers.end())
         {
-            cout << "!! REGISTER ERROR: " << register_name << " " << reg_a << " " << reg_b << endl;
-            result = -1;
+            out << "!! REGISTER ERROR: " << register_name << " missing from emulator state" << std::endl;
+            match = false;
+        }
+        else if (it->second != value)
+        {
+            out << "!! REGISTER ERROR: " << register_name << " expected " << fmt(value)
+                << ", emulator " << fmt(it->second) << std::endl;
+            match = false;
         }
     }
 
-    // validate memory
-    for (auto& [address, value] : a.memory)
+    for (const auto &[address, value] : expected.memory)
     {
-        unsigned int mem_a = value;
-        unsigned int mem_b = b.memory[address];
-
-        if(mem_a != mem_b)
+        auto it = actual.state.memory.find(address);
+        uint64_t emu = (it == actual.state.memory.end()) ? 0 : it->second;
+        if (it == actual.state.memory.end() || emu != value)
         {
-            cout << "!! MEMORY ERROR: " << address << " " << mem_a << " " << mem_b << endl;
-            result = -1;
+            out << "!! MEMORY ERROR: " << fmt(address) << " expected " << fmt(value)
+                << ", emulator " << fmt(emu) << std::endl;
+            match = false;
         }
     }
 
-    return result;
+    for (const auto &[address, value] : actual.unlisted_writes)
+    {
+        out << "!! UNEXPECTED MEMORY WRITE: " << fmt(address) << " = " << fmt(value)
+            << " (address not in expected final state)" << std::endl;
+        match = false;
+    }
+
+    return match;
 }

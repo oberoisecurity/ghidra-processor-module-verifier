@@ -1,7 +1,7 @@
 //--------------------------------------------------------------------------------------
 // File: state.h
 //
-// Test parameters and statea
+// Test parameters and state
 //
 // Copyright (c) Oberoi Security Solutions. All rights reserved.
 // Licensed under the Apache 2.0 License.
@@ -9,35 +9,56 @@
 
 #pragma once
 
-#include <string>
+#include <cstddef>
+#include <cstdint>
 #include <map>
-using namespace std;
+#include <ostream>
+#include <string>
+#include <vector>
 
-typedef struct _TEST_PARAMS
+struct TEST_PARAMS
 {
     // passed in params
-    string json_filename;
-    string sla_filename;
-    string register_map_filename;
-    string program_counter; // program program_counter
-    unsigned int max_failures; // maximum number of failures allowed before aborting test
-    unsigned int start_test; // what test number to start on
-    unsigned int end_test; // what test number to end on
-    unsigned int num_threads; // how many threads to use
-
-    // obtained via sla file
-    unsigned int word_size;
+    std::vector<std::string> json_filenames;
+    std::string sla_filename;
+    std::string register_map_filename;
+    std::string program_counter;          // name of the program counter register
+    unsigned int max_failures = 10;       // failures allowed before aborting. 0 == unlimited
+    size_t start_test = 0;                // first test index (inclusive)
+    size_t end_test = SIZE_MAX;           // last test index (exclusive)
+    unsigned int num_threads = 1;         // worker threads
+    bool quiet = false;                   // only print failures and the summary
+    bool check_unlisted_writes = true;    // flag writes to memory not listed in the expected state
 
     // parsed from register mapping file
-    map<std::string, std::string> register_map; // mapping of test registers to Ghidra processor module registers
+    std::map<std::string, std::string> register_map; // test register name -> Ghidra register name
 
-} TEST_PARAMS, *PTEST_PARAMS;
+    // context variable defaults (e.g. TMode=1), normally supplied by the .pspec
+    std::map<std::string, uint32_t> context;
+};
 
-typedef struct _TEST_STATE
+struct TEST_STATE
 {
-    map<std::string, unsigned int> registers;
-    map<unsigned long long, unsigned char> memory;
-} TEST_STATE, *PTEST_STATE;
+    std::map<std::string, uint64_t> registers;
+    std::map<uint64_t, uint8_t> memory;
+};
 
-int print_state(TEST_STATE &a);
-int compare_state(TEST_STATE &a, TEST_STATE &b);
+struct TEST_CASE
+{
+    std::string name;
+    TEST_STATE initial;
+    TEST_STATE final;
+};
+
+struct EMU_RESULT
+{
+    TEST_STATE state;                          // emulator values for everything in the expected state
+    std::map<uint64_t, uint8_t> unlisted_writes; // modified bytes not present in the expected state
+    std::string error;                         // non-empty if the emulator threw
+};
+
+void print_state(const TEST_STATE &state, std::ostream &out);
+
+// Compare the expected state with the emulator result. Mismatches are written to out.
+// Returns true if they match.
+bool compare_state(const TEST_STATE &expected, const EMU_RESULT &actual, std::ostream &out);
